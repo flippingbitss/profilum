@@ -4,7 +4,7 @@
 
 ## Usage
 
-```
+```rust
 use profilum::*;
 
 define_slots!(Task {
