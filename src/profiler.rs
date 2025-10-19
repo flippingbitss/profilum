@@ -8,6 +8,7 @@ pub struct ProfilerSlot {
     name: &'static str,
     tsc_elapsed: u64,
     tsc_elapsed_children: u64,
+    tsc_elapsed_root: u64,
     hits: usize,
 }
 
@@ -17,6 +18,7 @@ impl ProfilerSlot {
             name: "",
             tsc_elapsed: 0,
             tsc_elapsed_children: 0,
+            tsc_elapsed_root: 0,
             hits: 0,
         }
     }
@@ -73,8 +75,8 @@ impl<T: Into<usize> + 'static> Profiler<T> {
                 let line = format!(
                     "    {:<24}: Exc: ({:.2}%), Inc: ({:.2}%), hits = {}, elapsed = {} \n",
                     slot.name,
-                    (slot.tsc_elapsed as f64 / total as f64) * 100.0,
                     ((slot.tsc_elapsed - slot.tsc_elapsed_children) as f64 / total as f64) * 100.0,
+                    (slot.tsc_elapsed_root as f64 / total as f64) * 100.0,
                     slot.hits,
                     slot.tsc_elapsed,
                 );
@@ -92,6 +94,7 @@ pub struct ProfileScope<'a, T: Into<usize> + 'static> {
     parent_slot_index: usize,
     tsc_start: u64,
     tsc_end: u64,
+    tsc_elapsed_root: u64,
     profiler: &'a mut Profiler<T>,
 }
 
@@ -104,11 +107,13 @@ impl<'a, T: Into<usize> + 'static> ProfileScope<'a, T> {
         let parent_slot = profiler.global_parent_slot;
         let current_slot = slot.into();
         profiler.global_parent_slot = current_slot;
+        let tsc_elapsed_root = profiler.slots[current_slot].tsc_elapsed_root;
         let ts = read_tsc();
         Self {
             name: name.into(),
             slot_index: current_slot,
             parent_slot_index: parent_slot,
+            tsc_elapsed_root,
             tsc_start: ts,
             tsc_end: ts,
             profiler,
@@ -122,16 +127,16 @@ impl<'a, T: Into<usize> + 'static> Drop for ProfileScope<'a, T> {
 
         // if self.parent_slot_index != self.slot_index {}
 
-        let current_slot = &mut self.profiler.slots[self.slot_index];
-
         let scope_elapsed = self.tsc_end - self.tsc_start;
-
-        current_slot.tsc_elapsed += scope_elapsed;
-        current_slot.hits += 1;
-        current_slot.name = self.name;
 
         let parent_slot = &mut self.profiler.slots[self.parent_slot_index];
         parent_slot.tsc_elapsed_children += scope_elapsed;
+
+        let current_slot = &mut self.profiler.slots[self.slot_index];
+        current_slot.tsc_elapsed += scope_elapsed;
+        current_slot.hits += 1;
+        current_slot.name = self.name;
+        current_slot.tsc_elapsed_root = self.tsc_elapsed_root + scope_elapsed;
 
         self.profiler.global_parent_slot = self.parent_slot_index;
     }
