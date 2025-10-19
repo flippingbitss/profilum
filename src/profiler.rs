@@ -6,9 +6,8 @@ use crate::profiler;
 #[derive(Clone, Copy)]
 pub struct ProfilerSlot {
     name: &'static str,
-    tsc_elapsed: u64,
-    tsc_elapsed_children: u64,
-    tsc_elapsed_root: u64,
+    tsc_elapsed_exclusive: u64,
+    tsc_elapsed_inclusive: u64,
     hits: usize,
 }
 
@@ -16,9 +15,8 @@ impl ProfilerSlot {
     const fn empty() -> Self {
         Self {
             name: "",
-            tsc_elapsed: 0,
-            tsc_elapsed_children: 0,
-            tsc_elapsed_root: 0,
+            tsc_elapsed_exclusive: 0,
+            tsc_elapsed_inclusive: 0,
             hits: 0,
         }
     }
@@ -75,10 +73,10 @@ impl<T: Into<usize> + 'static> Profiler<T> {
                 let line = format!(
                     "    {:<24}: Exc: ({:.2}%), Inc: ({:.2}%), hits = {}, elapsed = {} \n",
                     slot.name,
-                    ((slot.tsc_elapsed - slot.tsc_elapsed_children) as f64 / total as f64) * 100.0,
-                    (slot.tsc_elapsed_root as f64 / total as f64) * 100.0,
+                    ((slot.tsc_elapsed_exclusive) as f64 / total as f64) * 100.0,
+                    (slot.tsc_elapsed_inclusive as f64 / total as f64) * 100.0,
                     slot.hits,
-                    slot.tsc_elapsed,
+                    slot.tsc_elapsed_exclusive,
                 );
                 output.push_str(&line);
             }
@@ -107,7 +105,7 @@ impl<'a, T: Into<usize> + 'static> ProfileScope<'a, T> {
         let parent_slot = profiler.global_parent_slot;
         let current_slot = slot.into();
         profiler.global_parent_slot = current_slot;
-        let tsc_elapsed_root = profiler.slots[current_slot].tsc_elapsed_root;
+        let tsc_elapsed_root = profiler.slots[current_slot].tsc_elapsed_inclusive;
         let ts = read_tsc();
         Self {
             name: name.into(),
@@ -125,18 +123,20 @@ impl<'a, T: Into<usize> + 'static> Drop for ProfileScope<'a, T> {
     fn drop(&mut self) {
         self.tsc_end = read_tsc();
 
-        // if self.parent_slot_index != self.slot_index {}
-
         let scope_elapsed = self.tsc_end - self.tsc_start;
 
         let parent_slot = &mut self.profiler.slots[self.parent_slot_index];
-        parent_slot.tsc_elapsed_children += scope_elapsed;
+        parent_slot.tsc_elapsed_exclusive -= scope_elapsed;
+
+        // parent_slot.tsc_elapsed_exclusive = parent_slot
+        //     .tsc_elapsed_exclusive
+        //     .saturating_sub(scope_elapsed);
 
         let current_slot = &mut self.profiler.slots[self.slot_index];
-        current_slot.tsc_elapsed += scope_elapsed;
+        current_slot.tsc_elapsed_exclusive += scope_elapsed;
         current_slot.hits += 1;
         current_slot.name = self.name;
-        current_slot.tsc_elapsed_root = self.tsc_elapsed_root + scope_elapsed;
+        current_slot.tsc_elapsed_inclusive = self.tsc_elapsed_root + scope_elapsed;
 
         self.profiler.global_parent_slot = self.parent_slot_index;
     }
