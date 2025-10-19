@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 pub use crate::cpu::{get_cpu_freq, read_tsc};
+use crate::profiler;
 
 #[derive(Clone, Copy)]
 pub struct ProfilerSlot {
     name: &'static str,
     tsc_elapsed: u64,
+    tsc_elapsed_children: u64,
     hits: usize,
 }
 
@@ -14,6 +16,7 @@ impl ProfilerSlot {
         Self {
             name: "",
             tsc_elapsed: 0,
+            tsc_elapsed_children: 0,
             hits: 0,
         }
     }
@@ -26,6 +29,7 @@ pub struct Profiler<T: Into<usize> + 'static> {
     tsc_start: u64,
     tsc_end: u64,
     running: bool,
+    global_parent_slot: usize,
     __marker: std::marker::PhantomData<T>,
 }
 
@@ -35,6 +39,7 @@ impl<T: Into<usize> + 'static> Profiler<T> {
             slots: [ProfilerSlot::empty(); SLOT_COUNT],
             tsc_start: 0,
             tsc_end: 0,
+            global_parent_slot: 0,
             running: false,
             __marker: std::marker::PhantomData,
         }
@@ -63,12 +68,13 @@ impl<T: Into<usize> + 'static> Profiler<T> {
         ));
         output.push_str(&format!("Total elapsed: {}\n", total));
         output.push_str("Slots: \n");
-        for slot in p.slots {
+        for slot in p.slots.iter().skip(1) {
             if slot.hits != 0 {
                 let line = format!(
-                    "    {:<24}: ({:.2}%), hits = {}, elapsed = {} \n",
+                    "    {:<24}: Exc: ({:.2}%), Inc: ({:.2}%), hits = {}, elapsed = {} \n",
                     slot.name,
                     (slot.tsc_elapsed as f64 / total as f64) * 100.0,
+                    ((slot.tsc_elapsed - slot.tsc_elapsed_children) as f64 / total as f64) * 100.0,
                     slot.hits,
                     slot.tsc_elapsed,
                 );
@@ -80,40 +86,53 @@ impl<T: Into<usize> + 'static> Profiler<T> {
     }
 }
 
-pub struct ProfileScope<'a> {
+pub struct ProfileScope<'a, T: Into<usize> + 'static> {
     name: &'static str,
     slot_index: usize,
+    parent_slot_index: usize,
     tsc_start: u64,
     tsc_end: u64,
-    pub slots: &'a mut [ProfilerSlot],
+    profiler: &'a mut Profiler<T>,
 }
 
-impl<'a> ProfileScope<'a> {
+impl<'a, T: Into<usize> + 'static> ProfileScope<'a, T> {
     pub fn new(
         name: impl Into<&'static str>,
         slot: impl Into<usize>,
-        slots: &'a mut [ProfilerSlot],
+        profiler: &'a mut Profiler<T>,
     ) -> Self {
+        let parent_slot = profiler.global_parent_slot;
+        let current_slot = slot.into();
+        profiler.global_parent_slot = current_slot;
         let ts = read_tsc();
         Self {
             name: name.into(),
-            slot_index: slot.into(),
+            slot_index: current_slot,
+            parent_slot_index: parent_slot,
             tsc_start: ts,
             tsc_end: ts,
-            slots,
+            profiler,
         }
     }
 }
 
-impl<'a> Drop for ProfileScope<'a> {
+impl<'a, T: Into<usize> + 'static> Drop for ProfileScope<'a, T> {
     fn drop(&mut self) {
         self.tsc_end = read_tsc();
 
-        if let Some(slot) = self.slots.get_mut(self.slot_index) {
-            let scope_elapsed = self.tsc_end - self.tsc_start;
-            slot.tsc_elapsed += scope_elapsed;
-            slot.hits += 1;
-            slot.name = self.name;
-        }
+        // if self.parent_slot_index != self.slot_index {}
+
+        let current_slot = &mut self.profiler.slots[self.slot_index];
+
+        let scope_elapsed = self.tsc_end - self.tsc_start;
+
+        current_slot.tsc_elapsed += scope_elapsed;
+        current_slot.hits += 1;
+        current_slot.name = self.name;
+
+        let parent_slot = &mut self.profiler.slots[self.parent_slot_index];
+        parent_slot.tsc_elapsed_children += scope_elapsed;
+
+        self.profiler.global_parent_slot = self.parent_slot_index;
     }
 }

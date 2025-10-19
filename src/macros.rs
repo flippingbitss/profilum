@@ -22,7 +22,7 @@ macro_rules! get_profiler_metrics {
 #[macro_export]
 macro_rules! profile {
     ($slot:expr, $block:block) => {{
-        let _scope = ProfileScope::new($slot, $slot, unsafe { &mut PROFILER.slots });
+        let _scope = ProfileScope::new($slot, $slot, unsafe { &mut PROFILER });
         let output = { $block };
         output
     }};
@@ -49,13 +49,14 @@ macro_rules! define_slots {
 
         impl Into<usize> for $name {
             fn into(self) -> usize {
-               self as usize
+               self as usize + 1
             }
         }
 
         impl TryFrom<usize> for $name {
             type Error = &'static str;
             fn try_from(value: usize) -> Result<Self, Self::Error> {
+                let value = value + 1; // keep zero as sentinel
                 if value == 999999999 {
                     unreachable!()
                 }
