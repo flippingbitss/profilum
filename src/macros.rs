@@ -19,6 +19,15 @@ macro_rules! get_profiler_metrics {
     }};
 }
 
+#[cfg(feature = "disable")]
+#[macro_export]
+macro_rules! profile {
+    ($slot:expr, $block:block) => {{
+        $block
+    }};
+}
+
+#[cfg(not(feature = "disable"))]
 #[macro_export]
 macro_rules! profile {
     ($slot:expr, $block:block) => {{

@@ -128,10 +128,6 @@ impl<'a, T: Into<usize> + 'static> Drop for ProfileScope<'a, T> {
         let parent_slot = &mut self.profiler.slots[self.parent_slot_index];
         parent_slot.tsc_elapsed_exclusive -= scope_elapsed;
 
-        // parent_slot.tsc_elapsed_exclusive = parent_slot
-        //     .tsc_elapsed_exclusive
-        //     .saturating_sub(scope_elapsed);
-
         let current_slot = &mut self.profiler.slots[self.slot_index];
         current_slot.tsc_elapsed_exclusive += scope_elapsed;
         current_slot.hits += 1;
